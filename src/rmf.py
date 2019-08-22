@@ -52,11 +52,36 @@ class Rmf:
             self.vertices = []
             self.plane = []
 
+        @property
+        def is_clip(self):
+            return self.texture_name == 'CLIP'
+
+        @property
+        def is_sky(self):
+            return self.texture_name == 'SKY'
+
+        @property
+        def is_trigger(self):
+            return self.texture_name == 'AAATRIGGER'
+
     class Solid(object):
         def __init__(self):
             self.visgroup_index = 0
             self.color = Color()
             self.faces = []
+
+        @property
+        def has_clip(self):
+            return any(map(lambda x: x.is_clip, self.faces))
+
+        @property
+        def has_sky(self):
+            return any(map(lambda x: x.is_sky, self.faces))
+
+        @property
+        def has_trigger(self):
+            return any(map(lambda x: x.is_trigger, self.faces))
+
 
     class World(object):
         def __init__(self):

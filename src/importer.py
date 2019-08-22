@@ -27,7 +27,7 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         mesh_name = 'Solid.000'
         mesh = bpy.data.meshes.new(mesh_name)
         mesh_object = bpy.data.objects.new(mesh_name, mesh)
-        bpy.context.scene.collection.objects.link(mesh_object)
+
         bm = bmesh.new()
         vertex_offset = 0
         for f in solid.faces:
@@ -36,14 +36,29 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
             bm.verts.ensure_lookup_table()
             # The face order is reversed because of differences in winding order
             face = reversed([bm.verts[vertex_offset + x] for x in range(len(f.vertices))])
-            bmface = bm.faces.new(face)
+            bm.faces.new(face)
             vertex_offset += len(f.vertices)
         bm.to_mesh(mesh)
+
+        collection = self.get_collection_for_solid(solid)
+        collection.objects.link(mesh_object)
+
         return mesh_object
+
+    def get_collection_for_solid(self, solid):
+        if solid.has_clip:
+            return bpy.data.collections['Clip']
+        elif solid.has_sky:
+            return bpy.data.collections['Sky']
+        elif solid.has_trigger:
+            return bpy.data.collections['Trigger']
+        else:
+            return bpy.context.scene.collection
+
 
     def add_object(self, object):
         if type(object) == Rmf.Solid:
-            self.add_solid(object)
+            solid = self.add_solid(object)
         elif type(object) == Rmf.Entity:
             # TODO: abstract this out somehow
             entity = object
@@ -58,8 +73,14 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
                     pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
                     print(pitch, yaw, roll)
             else:
+                # TODO: create a collection
+                brush_entities_collection = bpy.data.collections['Brush Entities']
+                entity_collection = bpy.data.collections.new(entity.classname)
+                brush_entities_collection.children.link(entity_collection)
+                # TODO: make a new EMPTY
                 for solid in object.brushes:
-                    self.add_solid(solid)
+                    object = self.add_solid(solid)
+                    entity_collection.objects.link(object)
         elif type(object) == Rmf.Group:
             objects = [self.add_object(x) for x in object.objects]
             # bpy.ops.object.select_all(action='DESELECT')
@@ -68,6 +89,11 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
             # bpy.oops.group.create()
 
     def import_map(self, map):
+        # TODO: create collections!
+        collections_names = 'Trigger', 'Sky', 'Clip', 'Brush Entities'
+        for name in collections_names:
+            collection = bpy.data.collections.new(name)
+            bpy.context.scene.collection.children.link(collection)
         for i, object in enumerate(map.objects):
             self.add_object(object)
 
