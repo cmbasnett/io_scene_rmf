@@ -3,7 +3,7 @@ bl_info = {
     'description': 'Import Rich Map Format (rmf) files used in Valve Hammer Editor',
     'author': 'Colin Basnett',
     'version': (1, 0, 0),
-    'blender': (2, 79, 0),
+    'blender': (2, 80, 0),
     'location': 'File > Import-Export',
     'warning': 'This add-on is under development.',
     'wiki_url': 'https://github.com/cmbasnett/io_scene_rmf/wiki',
@@ -23,12 +23,24 @@ from . import rmf
 from . import reader
 from . import importer
 
+classes = (
+    importer.RMF_OT_ImportOperator,
+)
+
+
+def menu_func_import(self, context):
+    self.layout.operator(importer.RMF_OT_ImportOperator.bl_idname, text='Rich Map Format (.rmf)')
+
+
 def register():
-    bpy.utils.register_module(__name__)
-    bpy.types.INFO_MT_file_import.append(importer.ImportOperator.menu_func_import)
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 
 def unregister():
-    bpy.utils.unregister_module(__name__)
-    bpy.types.INFO_MT_file_import.remove(importer.ImportOperator.menu_func_import)
+    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
 
+    for cls in classes:
+        bpy.utils.unregister_class(cls)
