@@ -14,11 +14,13 @@ bl_info = {
 
 if 'bpy' in locals():
     import importlib
+    if 'utils'      in locals(): importlib.reload(utils)
     if 'rmf'       in locals():  importlib.reload(rmf)
     if 'reader'     in locals(): importlib.reload(reader)
     if 'importer'   in locals(): importlib.reload(importer)
 
 import bpy
+from . import utils
 from . import rmf
 from . import reader
 from . import importer

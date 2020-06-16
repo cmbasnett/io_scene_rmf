@@ -1,22 +1,4 @@
-class Vector2(object):
-    def __init__(self):
-        self.x = 0
-        self.y = 0
-
-
-class Vector3(object):
-    def __init__(self):
-        self.x = 0
-        self.y = 0
-        self.z = 0
-
-    def __iter__(self):
-        yield self.x
-        yield self.y
-        yield self.z
-
-    def __repr__(self):
-        return '(' + ','.join([str(x) for x in [self.x, self.y, self.z]]) + ')'
+import numpy
 
 
 class Color(object):
@@ -43,12 +25,12 @@ class Rmf:
     class Face(object):
         def __init__(self):
             self.texture_name = ''
-            self.texture_u_axis = Vector3()
+            self.texture_u_axis = numpy.array([0.0, 0.0, 0.0])
             self.texture_u_shift = 0.0
-            self.texture_v_axis = Vector3()
+            self.texture_v_axis = numpy.array([0.0, 0.0, 0.0])
             self.texture_v_shift = 0.0
             self.texture_rotation = 0.0
-            self.texture_scale = Vector2()
+            self.texture_scale = numpy.array([0.0, 0.0])
             self.vertices = []
             self.plane = []
 
@@ -98,7 +80,7 @@ class Rmf:
             self.classname = ''
             self.flags = ''
             self.properties = {}
-            self.location = Vector3()
+            self.location = numpy.array([0.0, 0.0, 0.0])
 
         def __getitem__(self, key):
             return self.properties[key]
@@ -109,7 +91,7 @@ class Rmf:
 
     class Corner(object):
         def __init__(self):
-            self.location = Vector3()
+            self.location = numpy.array([0.0, 0.0, 0.0])
             self.index = 0
             self.name = ''
             self.properties = dict()

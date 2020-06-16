@@ -25,16 +25,12 @@ class RmfReader:
         pass
 
     @staticmethod
-    def read_vector2(f):
-        vector = Vector2()
-        vector.x, vector.y = unpack(f, '2f')
-        return vector
+    def read_vector2(f, v):
+        v[0], v[1] = unpack(f, '2f')
 
     @staticmethod
-    def read_vector3(f):
-        vector = Vector3()
-        vector.x, vector.y, vector.z = unpack(f, '3f')
-        return vector
+    def read_vector3(f, v):
+        v[0], v[1], v[2] = unpack(f, '3f')
 
     @staticmethod
     def read_color(f):
@@ -57,16 +53,21 @@ class RmfReader:
         face = Rmf.Face()
         face.texture_name = read_fixed_length_null_terminated_string(f, 256)
         unpack(f, 'f')
-        face.texture_u_axis = RmfReader.read_vector3(f)
-        face.texture_u_shift = unpack(f, 'f')
-        face.texture_v_axis = RmfReader.read_vector3(f)
-        face.texture_u_shift = unpack(f, 'f')
-        face.texture_rotation = unpack(f, 'f')
-        face.texture_scale = RmfReader.read_vector2(f)
+        RmfReader.read_vector3(f, face.texture_u_axis)
+        face.texture_u_shift = unpack(f, 'f')[0]
+        RmfReader.read_vector3(f, face.texture_v_axis)
+        face.texture_v_shift = unpack(f, 'f')[0]
+        face.texture_rotation = unpack(f, 'f')[0]
+        RmfReader.read_vector2(f, face.texture_scale)
         unpack(f, '16b')
         vertex_count = unpack(f, 'i')[0]
-        face.vertices = [RmfReader.read_vector3(f) for _ in range(vertex_count)]
-        face.plane = [RmfReader.read_vector3(f) for _ in range(3)]
+        for i in range(vertex_count):
+            vertex = numpy.array([0.0, 0.0, 0.0])
+            RmfReader.read_vector3(f, vertex)
+            face.vertices.append(vertex)
+        for i in range(3):
+            face.plane.append(numpy.array([0.0, 0.0, 0.0]))
+            RmfReader.read_vector3(f, face.plane[i])
         return face
 
     @staticmethod
@@ -106,7 +107,7 @@ class RmfReader:
         entity.flags = unpack(f, 'i')
         entity.properties = RmfReader.read_properties(f)
         unpack(f, '14b')
-        entity.location = RmfReader.read_vector3(f)
+        RmfReader.read_vector3(f, entity.location)
         unpack(f, '4b')
         return entity
 
@@ -122,7 +123,7 @@ class RmfReader:
     @staticmethod
     def read_corner(f):
         corner = Rmf.Corner()
-        corner.location = RmfReader.read_vector3(f)
+        RmfReader.read_vector3(f, corner.location)
         corner.index = unpack(f, 'i')
         corner.name = read_fixed_length_null_terminated_string(f, 128)
         corner.properties = RmfReader.read_properties(f)

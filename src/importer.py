@@ -5,6 +5,7 @@ from mathutils import Vector, Matrix, Quaternion
 from bpy.props import StringProperty, BoolProperty, FloatProperty
 from .reader import RmfReader
 from .rmf import *
+from .utils import convert_rmf_to_uv
 
 
 class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
@@ -15,7 +16,7 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
     bl_region_type = 'WINDOW'
 
     # ImportHelper mixin class uses this
-    filename_ext = ".rmf"
+    filename_ext = '.rmf'
 
     filter_glob : StringProperty(
         default="*.rmf",
@@ -26,7 +27,17 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
     def add_solid(self, solid):
         mesh_name = 'Solid.000'
         mesh = bpy.data.meshes.new(mesh_name)
+
         mesh_object = bpy.data.objects.new(mesh_name, mesh)
+
+        textures = []
+        for f in solid.faces:
+            if bpy.data.materials.find(f.texture_name) == -1:
+                bpy.data.materials.new(f.texture_name)
+            material = bpy.data.materials[f.texture_name]
+            if f.texture_name not in textures:
+                textures.append(f.texture_name)
+                mesh.materials.append(material)
 
         bm = bmesh.new()
         vertex_offset = 0
@@ -34,14 +45,32 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
             for vertex in f.vertices:
                 bm.verts.new(tuple(vertex))
             bm.verts.ensure_lookup_table()
+
             # The face order is reversed because of differences in winding order
             face = reversed([bm.verts[vertex_offset + x] for x in range(len(f.vertices))])
-            bm.faces.new(face)
+            bmface = bm.faces.new(face)
+            bmface.material_index = textures.index(f.texture_name)
             vertex_offset += len(f.vertices)
+
         bm.to_mesh(mesh)
 
         collection = self.get_collection_for_solid(solid)
         collection.objects.link(mesh_object)
+
+        '''
+        Assign texture coordinates
+        '''
+        uv_layer = mesh.uv_layers.new()
+        uv_texture = mesh.uv_layers[0]
+        j = 0
+        for face_index, face in enumerate(solid.faces):
+            # NOTE: the UV order has to be reversed to match the reversed vertices due to winding order
+            # TODO: come up with a more elegant solution for this
+            uv = reversed(convert_rmf_to_uv(face))
+            for i, uv in enumerate(uv):
+                uv[1] = -uv[1]
+                uv_texture.data[j].uv = uv.tolist()
+                j += 1
 
         return mesh_object
 
