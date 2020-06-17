@@ -1,11 +1,65 @@
 import bpy
 import bpy_extras
 import bmesh
+import os
 from mathutils import Vector, Matrix, Quaternion
-from bpy.props import StringProperty, BoolProperty, FloatProperty
+from bpy.props import StringProperty, BoolProperty, IntProperty, FloatProperty, CollectionProperty
 from .reader import RmfReader
 from .rmf import *
-from .utils import convert_rmf_to_uv
+from .wad import *
+from .config import rmf_icons
+from .utils import convert_rmf_face_texture_coordinates_to_uvs
+
+
+class RMF_LI_WadListItem(bpy.types.PropertyGroup):
+    path: StringProperty()
+    texture_count: IntProperty()
+
+    @property
+    def name(self):
+        return self.path
+
+class RMF_UL_WadList(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        print(rmf_icons)
+        layout.alignment = 'LEFT'
+        # layout.prop(item, 'is_selected', icon_only=True)
+        layout.label(text=item.path, icon='ACTION')
+
+    def filter_items(self, context, data, property):
+        wads = getattr(data, property)
+        flt_flags = []
+        flt_neworder = []
+        if self.filter_name:
+            flt_flags = bpy.types.UI_UL_list.filter_items_by_name(self.filter_name, self.bitflag_filter_item, wads, 'name', reverse=self.use_filter_invert)
+        return flt_flags, flt_neworder
+
+
+class RMF_OT_AddWadOperator(bpy.types.Operator):
+    bl_idname = "scene.rmf_add_wad_operator"
+    bl_label = "Add WADs"
+
+    filepath : bpy.props.StringProperty(name="File Path", description="Filepath used for importing WAD files", maxlen=1024, default="")
+    files : bpy.props.CollectionProperty(
+        name="File Path",
+        type=bpy.types.OperatorFileListElement,
+    )
+    filename_ext = ".wad"
+    filter_glob : bpy.props.StringProperty(default="*.wad", options={'HIDDEN'})
+
+    def execute(self, context):
+        root = os.path.dirname(self.filepath)
+        for file in self.files:
+            wad_list_item = context.scene.rmf_wad_list.add()
+            wad_list_item.path = os.path.join(root, file.name)
+            wad_list_item.texture_count = 0
+        return {'FINISHED'}
+
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        wm.fileselect_add(self)
+        return {'RUNNING_MODAL'}
 
 
 class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
@@ -21,8 +75,55 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
     filter_glob : StringProperty(
         default="*.rmf",
         options={'HIDDEN'},
-        maxlen=255,  # Max internal buffer length, longer would be clighted.
+        maxlen=255,  # Max internal buffer length, longer would be hilighted.
     )
+
+    should_import_textures : BoolProperty(
+        default=False
+    )
+
+    should_ignore_null_faces : BoolProperty(
+        default=True,
+    )
+
+    wads = []
+    texture_size_cache = dict()  # str: tuple dict
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        layout.prop(self, 'should_import_textures', text='Import Textures')
+        if self.should_import_textures:
+            box = layout.box()
+            box.label(text='Textures', icon='ACTION')
+            row = box.row()
+            row.template_list('RMF_UL_WadList', 'asd', scene, 'rmf_wad_list', scene, 'rmf_wad_list_index', rows=8)
+            layout.operator(RMF_OT_AddWadOperator.bl_idname, icon='ADD')
+        layout.prop(self, 'should_ignore_null_faces', text='Ignore NULL faces')
+
+    '''
+    Loads all the WADs in the list.
+    '''
+    def load_wads(self, context):
+        self.wads.clear()
+        for wad in context.scene.rmf_wad_list:
+            print(wad)
+            self.wads.append(Wad(wad.path))
+
+    ''''
+    Gets the size of a texture, also caches the lookup to a local dictionary.
+    '''
+    def get_texture_size(self, name: str):
+        name = name.upper()
+        if name in self.texture_size_cache:
+            return self.texture_size_cache[name]
+        for wad in self.wads:
+            if wad.has_texture(name):
+                size = wad.get_texture_size(name)
+                self.texture_size_cache[name] = size
+                return size
+        raise LookupError(f'cannot get texture size for \"{name}\"')
+
 
     def add_solid(self, solid):
         mesh_name = 'Solid.000'
@@ -30,8 +131,13 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
 
         mesh_object = bpy.data.objects.new(mesh_name, mesh)
 
+        '''
+        Create or reuse materials 
+        '''
         textures = []
         for f in solid.faces:
+            if self.should_ignore_null_faces and f.texture_name == 'NULL':
+                continue
             if bpy.data.materials.find(f.texture_name) == -1:
                 bpy.data.materials.new(f.texture_name)
             material = bpy.data.materials[f.texture_name]
@@ -42,6 +148,8 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         bm = bmesh.new()
         vertex_offset = 0
         for f in solid.faces:
+            if self.should_ignore_null_faces and f.texture_name == 'NULL':
+                continue
             for vertex in f.vertices:
                 bm.verts.new(tuple(vertex))
             bm.verts.ensure_lookup_table()
@@ -57,20 +165,24 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         collection = self.get_collection_for_solid(solid)
         collection.objects.link(mesh_object)
 
-        '''
-        Assign texture coordinates
-        '''
-        uv_layer = mesh.uv_layers.new()
-        uv_texture = mesh.uv_layers[0]
-        j = 0
-        for face_index, face in enumerate(solid.faces):
-            # NOTE: the UV order has to be reversed to match the reversed vertices due to winding order
-            # TODO: come up with a more elegant solution for this
-            uv = reversed(convert_rmf_to_uv(face))
-            for i, uv in enumerate(uv):
-                uv[1] = -uv[1]
-                uv_texture.data[j].uv = uv.tolist()
-                j += 1
+        if self.should_import_textures:
+            '''
+            Assign texture coordinates
+            '''
+            uv_layer = mesh.uv_layers.new()
+            uv_texture = mesh.uv_layers[0]
+            j = 0
+            for face_index, face in enumerate(solid.faces):
+                # NOTE: the UV order has to be reversed to match the reversed vertices due to winding order
+                # TODO: come up with a more elegant solution for this
+                if self.should_ignore_null_faces and face.texture_name == 'NULL':
+                    continue
+                texture_size = self.get_texture_size(face.texture_name)
+                uvs = convert_rmf_face_texture_coordinates_to_uvs(face, texture_size)
+                for uv in reversed(uvs):
+                    uv[1] = -uv[1]
+                    uv_texture.data[j].uv = uv.tolist()
+                    j += 1
 
         return mesh_object
 
@@ -127,7 +239,7 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
             self.add_object(object)
 
     def execute(self, context):
-        # Now add it all in baybee
+        self.load_wads(context)
         rmf = RmfReader().from_file(self.filepath)
         self.import_map(rmf)
         return {'FINISHED'}
