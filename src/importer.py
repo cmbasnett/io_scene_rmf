@@ -21,7 +21,6 @@ class RMF_LI_WadListItem(bpy.types.PropertyGroup):
 
 class RMF_UL_WadList(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        print(rmf_icons)
         layout.alignment = 'LEFT'
         # layout.prop(item, 'is_selected', icon_only=True)
         layout.label(text=item.path, icon='ACTION')
@@ -107,8 +106,21 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
     def load_wads(self, context):
         self.wads.clear()
         for wad in context.scene.rmf_wad_list:
-            print(wad)
             self.wads.append(Wad(wad.path))
+
+    def has_wad_for_texture(self, name):
+        try:
+            self.get_wad_for_texture(name)
+            return True
+        except LookupError:
+            return False
+
+    def get_wad_for_texture(self, name):
+        name = name.upper()
+        for wad in self.wads:
+            if wad.has_texture(name):
+                return wad
+        raise LookupError(f'no wad with texture "{name}"')
 
     ''''
     Gets the size of a texture, also caches the lookup to a local dictionary.
@@ -117,15 +129,57 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         name = name.upper()
         if name in self.texture_size_cache:
             return self.texture_size_cache[name]
-        for wad in self.wads:
-            if wad.has_texture(name):
-                size = wad.get_texture_size(name)
-                self.texture_size_cache[name] = size
-                return size
-        raise LookupError(f'cannot get texture size for \"{name}\"')
+        wad = self.get_wad_for_texture(name)
+        size = wad.get_texture_size(name)
+        self.texture_size_cache[name] = size
+        return size
 
+    def get_texture_pixels(self, name: str):
+        wad = self.get_wad_for_texture(name)
+        return wad.get_texture_pixels(name)
+
+    def load_image(self, texture_name):
+        if texture_name in bpy.data.images:
+            return bpy.data.images[texture_name]
+        if not self.has_wad_for_texture(texture_name):
+            return None
+        width, height = self.get_texture_size(texture_name)
+        pixels = self.get_texture_pixels(texture_name)
+        image = bpy.data.images.new(texture_name.upper(), width=width, height=height)
+        image.pixels = pixels
+        return image
+
+    def load_material(self, texture_name):
+        if bpy.data.materials.find(texture_name) != -1:
+            return bpy.data.materials[texture_name]
+        material = bpy.data.materials.new(texture_name)
+        material.use_nodes = True
+        nodes = material.node_tree.nodes
+        links = material.node_tree.links
+        # TODO: make this better, set up node positions etc.
+        diffuse_bsdf_node = nodes.new('ShaderNodeBsdfDiffuse')
+
+        image_texture_node = nodes.new('ShaderNodeTexImage')
+        image_texture_node.image = self.load_image(texture_name)
+
+        material_output_node = nodes['Material Output']
+
+        links.new(diffuse_bsdf_node.inputs['Color'], image_texture_node.outputs['Color'])
+        links.new(material_output_node.inputs['Surface'], diffuse_bsdf_node.outputs['BSDF'])
+
+        return material
 
     def add_solid(self, solid):
+        '''
+        Prune faces based on material names.
+        '''
+        # TODO: have this list be part of the settings!
+        textures_to_ignore = {'NULL', 'AAATRIGGER', 'CLIP', 'SKY', '{BLUE'}
+        faces = list(filter(lambda f: f.texture_name not in textures_to_ignore, solid.faces))
+
+        if len(faces) == 0:
+            return None
+
         mesh_name = 'Solid.000'
         mesh = bpy.data.meshes.new(mesh_name)
 
@@ -135,21 +189,15 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         Create or reuse materials 
         '''
         textures = []
-        for f in solid.faces:
-            if self.should_ignore_null_faces and f.texture_name == 'NULL':
-                continue
-            if bpy.data.materials.find(f.texture_name) == -1:
-                bpy.data.materials.new(f.texture_name)
-            material = bpy.data.materials[f.texture_name]
+        for f in faces:
+            material = self.load_material(f.texture_name)
             if f.texture_name not in textures:
                 textures.append(f.texture_name)
                 mesh.materials.append(material)
 
         bm = bmesh.new()
         vertex_offset = 0
-        for f in solid.faces:
-            if self.should_ignore_null_faces and f.texture_name == 'NULL':
-                continue
+        for f in faces:
             for vertex in f.vertices:
                 bm.verts.new(tuple(vertex))
             bm.verts.ensure_lookup_table()
@@ -165,23 +213,24 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         collection = self.get_collection_for_solid(solid)
         collection.objects.link(mesh_object)
 
+        default_texture_size = 256, 256
         if self.should_import_textures:
             '''
             Assign texture coordinates
             '''
             uv_layer = mesh.uv_layers.new()
-            uv_texture = mesh.uv_layers[0]
             j = 0
-            for face_index, face in enumerate(solid.faces):
-                # NOTE: the UV order has to be reversed to match the reversed vertices due to winding order
-                # TODO: come up with a more elegant solution for this
-                if self.should_ignore_null_faces and face.texture_name == 'NULL':
-                    continue
-                texture_size = self.get_texture_size(face.texture_name)
+            for face_index, face in enumerate(faces):
+                try:
+                    texture_size = self.get_texture_size(face.texture_name)
+                except LookupError:
+                    # If we don't have the texture, just assume a texture size of 256x256
+                    texture_size = default_texture_size
                 uvs = convert_rmf_face_texture_coordinates_to_uvs(face, texture_size)
+                # NOTE: the UV order has to be reversed to match the reversed vertices due to winding order
                 for uv in reversed(uvs):
                     uv[1] = -uv[1]
-                    uv_texture.data[j].uv = uv.tolist()
+                    uv_layer.data[j].uv = uv.tolist()
                     j += 1
 
         return mesh_object
@@ -212,7 +261,6 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
                     # TODO: put the light somewhere
                     bpy.context.scene.collection.objects.link(light_object)
                     pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
-                    print(pitch, yaw, roll)
             else:
                 # TODO: create a collection
                 brush_entities_collection = bpy.data.collections['Brush Entities']
@@ -220,8 +268,9 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
                 brush_entities_collection.children.link(entity_collection)
                 # TODO: make a new EMPTY
                 for solid in object.brushes:
-                    object = self.add_solid(solid)
-                    entity_collection.objects.link(object)
+                    solid_object = self.add_solid(solid)
+                    if solid_object is not None:
+                        entity_collection.objects.link(solid_object)
         elif type(object) == Rmf.Group:
             objects = [self.add_object(x) for x in object.objects]
             # bpy.ops.object.select_all(action='DESELECT')
@@ -229,12 +278,15 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
             #    object.select = True
             # bpy.oops.group.create()
 
-    def import_map(self, map):
-        # TODO: create collections!
+    def create_collections(self):
         collections_names = 'Trigger', 'Sky', 'Clip', 'Brush Entities'
         for name in collections_names:
-            collection = bpy.data.collections.new(name)
-            bpy.context.scene.collection.children.link(collection)
+            if name not in bpy.data.collections:
+                collection = bpy.data.collections.new(name)
+                bpy.context.scene.collection.children.link(collection)
+
+    def import_map(self, map):
+        self.create_collections()
         for i, object in enumerate(map.objects):
             self.add_object(object)
 

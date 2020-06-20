@@ -1,4 +1,6 @@
 from ctypes import *
+import struct
+import numpy
 
 # https://yuraj.ucoz.com/half-life-formats.pdf
 
@@ -31,8 +33,36 @@ class Wad(object):
         data = data_class.from_buffer_copy(self.fp.read(sizeof(data_class)))
         return data.width, data.height
 
+    # http://hlbsp.sourceforge.net/index.php?content=waddef
+
     def get_texture_pixels(self, name):
-        raise NotImplementedError()
+        lump = self.lumps[name.upper()]
+        self.fp.seek(lump.offset)
+        self.fp.read(16)  # skip the name
+        width, height = struct.unpack('II', self.fp.read(8))
+        mip_offsets = struct.unpack('4I', self.fp.read(16))
+        pixels_indices = []
+        # TODO: precaculate the offset of the palette so we don't have to run through all the mipmaps
+        for i, mip_offset in enumerate(mip_offsets):
+            self.fp.seek(lump.offset + mip_offset)
+            length = (width >> i) * (height >> i)
+            if i == 0:
+                pixels_indices = numpy.array(list(self.fp.read(length)), dtype=numpy.uint8)
+            else:
+                # dumb skip
+                self.fp.read(length)
+        self.fp.read(2)
+        palette = numpy.array(list(self.fp.read(3 * 256)))
+        palette.resize((256, 3))
+        pixels = numpy.ones((width * height, 4))
+        is_alpha_texture = name.startswith('{')
+        for i, pixel_index in enumerate(pixels_indices):
+            pixels[i][:3] = [x / 255.0 for x in palette[pixel_index]]
+            if is_alpha_texture and pixel_index == 255:
+                pixels[i][3] = 0.0
+        pixels.resize((height, width, 4))
+        pixels = numpy.flip(pixels, 0)
+        return pixels.flatten()
 
 class Header(Structure):
     _fields_ = [
