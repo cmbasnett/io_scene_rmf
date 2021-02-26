@@ -54,7 +54,6 @@ class RMF_OT_AddWadOperator(bpy.types.Operator):
             wad_list_item.texture_count = 0
         return {'FINISHED'}
 
-
     def invoke(self, context, event):
         wm = context.window_manager
         wm.fileselect_add(self)
@@ -285,10 +284,10 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
                 collection = bpy.data.collections.new(name)
                 bpy.context.scene.collection.children.link(collection)
 
-    def import_map(self, map):
+    def import_map(self, rmf):
         self.create_collections()
-        for i, object in enumerate(map.objects):
-            self.add_object(object)
+        for i, obj in enumerate(rmf.root_object.objects):
+            self.add_object(obj)
 
     def execute(self, context):
         self.load_wads(context)

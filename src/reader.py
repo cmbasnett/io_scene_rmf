@@ -21,8 +21,6 @@ def read_length_prefixed_null_terminated_string(f):
 
 # https://developer.valvesoftware.com/wiki/Rich_Map_Format
 class RmfReader:
-    def __init__(self):
-        pass
 
     @staticmethod
     def read_vector2(f, v):
@@ -43,47 +41,64 @@ class RmfReader:
         visgroup = Rmf.VisGroup()
         visgroup.name = read_fixed_length_null_terminated_string(f, 128)
         visgroup.color = RmfReader.read_color(f)
-        visgroup.unk1, \
-        visgroup.index, \
-        visgroup.is_visible = unpack(f, 'bib')
+        visgroup.unk1 = unpack(f, 'b')[0]
+        visgroup.index = unpack(f, 'i')[0]
+        visgroup.is_visible = unpack(f, 'b')[0]
+        visgroup.unk2 = f.read(3)  # this is just padding
         return visgroup
 
     @staticmethod
     def read_face(f):
         face = Rmf.Face()
         face.texture_name = read_fixed_length_null_terminated_string(f, 256)
-        unpack(f, 'f')
+        face.unk1 = unpack(f, 'f')[0]
         RmfReader.read_vector3(f, face.texture_u_axis)
         face.texture_u_shift = unpack(f, 'f')[0]
         RmfReader.read_vector3(f, face.texture_v_axis)
         face.texture_v_shift = unpack(f, 'f')[0]
         face.texture_rotation = unpack(f, 'f')[0]
         RmfReader.read_vector2(f, face.texture_scale)
-        unpack(f, '16b')
+        face.unk2 = f.read(16)
         vertex_count = unpack(f, 'i')[0]
         for i in range(vertex_count):
             vertex = numpy.array([0.0, 0.0, 0.0])
             RmfReader.read_vector3(f, vertex)
             face.vertices.append(vertex)
         for i in range(3):
-            face.plane.append(numpy.array([0.0, 0.0, 0.0]))
             RmfReader.read_vector3(f, face.plane[i])
         return face
 
     @staticmethod
     def read_solid(f):
         solid = Rmf.Solid()
-        solid.visgroup_index = unpack(f, 'i')
+        solid.visgroup_index = unpack(f, 'i')[0]
         solid.color = RmfReader.read_color(f)
-        _ = unpack(f, '4b')
+        solid.unk1 = f.read(4)
         face_count = unpack(f, 'i')[0]
         solid.faces = [RmfReader.read_face(f) for _ in range(face_count)]
         return solid
 
     @staticmethod
+    def read_camera(f):
+        camera = Rmf.Camera()
+        RmfReader.read_vector3(f, camera.eye)
+        RmfReader.read_vector3(f, camera.lookat)
+        return camera
+
+    @staticmethod
+    def read_docinfo(f):
+        r = unpack(f, '8s')
+        docinfo = Rmf.DocumentInfo()
+        docinfo.version = unpack(f, 'f')[0]
+        docinfo.camera_index = unpack(f, 'i')[0]
+        camera_count = unpack(f, 'i')[0]
+        docinfo.cameras = [RmfReader.read_camera(f) for _ in range(camera_count)]
+        return docinfo
+
+    @staticmethod
     def read_world(f):
         world = Rmf.World()
-        f.read(7)  # ? (probably visgroup and Color fields but not used by VHE)
+        world.unk1 = f.read(7)  # (probably visgroup and Color fields but not used by VHE)
         object_count = unpack(f, 'i')[0]
         world.objects = [RmfReader.read_object(f) for _ in range(object_count)]
         world.classname = read_length_prefixed_null_terminated_string(f)
@@ -103,18 +118,18 @@ class RmfReader:
         brush_count = unpack(f, 'i')[0]
         entity.brushes = [RmfReader.read_object(f) for _ in range(brush_count)]
         entity.classname = read_length_prefixed_null_terminated_string(f)
-        unpack(f, '4b')
-        entity.flags = unpack(f, 'i')
+        entity.unk1 = f.read(4)
+        entity.flags = unpack(f, 'i')[0]
         entity.properties = RmfReader.read_properties(f)
-        unpack(f, '14b')
+        entity.unk2 = f.read(14)
         RmfReader.read_vector3(f, entity.location)
-        unpack(f, '4b')
+        entity.unk3 = f.read(4)
         return entity
 
     @staticmethod
     def read_group(f):
         group = Rmf.Group()
-        group.visgroup_index = unpack(f, 'i')
+        group.visgroup_index = unpack(f, 'i')[0]
         group.color = RmfReader.read_color(f)
         object_count = unpack(f, 'i')[0]
         group.objects = [RmfReader.read_object(f) for _ in range(object_count)]
@@ -153,7 +168,7 @@ class RmfReader:
 
     @staticmethod
     def read_properties(f):
-        properties = dict()
+        properties = OrderedDict()
         property_count = unpack(f, 'i')[0]
         for _ in range(property_count):
             key = read_length_prefixed_null_terminated_string(f)
@@ -166,7 +181,10 @@ class RmfReader:
         with open(path, 'rb') as f:
             version, magic = unpack(f, 'i3s')
             visgroup_count = unpack(f, 'i')[0]
+            rmf = Rmf()
             for i in range(visgroup_count):
                 visgroup = RmfReader.read_visgroup(f)
-            rmf = RmfReader.read_object(f)
+                rmf.visgroups.append(visgroup)
+            rmf.root_object = RmfReader.read_object(f)
+            rmf.docinfo = RmfReader.read_docinfo(f)
             return rmf

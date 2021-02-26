@@ -14,12 +14,16 @@ bl_info = {
 
 if 'bpy' in locals():
     import importlib
+    # TODO: does this also conflict with other shit?
     if 'config'     in locals(): importlib.reload(config)
     if 'utils'      in locals(): importlib.reload(utils)
     if 'wad'        in locals(): importlib.reload(wad)
     if 'rmf'        in locals(): importlib.reload(rmf)
     if 'reader'     in locals(): importlib.reload(reader)
+    if 'writer'     in locals(): importlib.reload(writer)
     if 'importer'   in locals(): importlib.reload(importer)
+    if 'exporter'   in locals(): importlib.reload(exporter)
+    if 'builder'    in locals(): importlib.reload(builder)
 
 import bpy
 import bpy.utils.previews
@@ -30,7 +34,10 @@ from . import utils
 from . import wad
 from . import rmf
 from . import reader
+from . import writer
 from . import importer
+from . import exporter
+from . import builder
 
 icons = [
     # 'lambda',
@@ -41,11 +48,16 @@ classes = (
     importer.RMF_OT_ImportOperator,
     importer.RMF_UL_WadList,
     importer.RMF_LI_WadListItem,
+    exporter.RMF_OT_ExportOperator
 )
 
 
 def menu_func_import(self, context):
     self.layout.operator(importer.RMF_OT_ImportOperator.bl_idname, text='Rich Map Format (.rmf)')
+
+
+def menu_func_export(self, context):
+    self.layout.operator(exporter.RMF_OT_ExportOperator.bl_idname, text='Rich Map Format (.rmf)')
 
 
 def register():
@@ -61,9 +73,11 @@ def register():
     bpy.types.Scene.rmf_wad_list_index = IntProperty(default=0)
 
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
 
 def unregister():
+    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
 
     del bpy.types.Scene.rmf_wad_list
