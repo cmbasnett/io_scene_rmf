@@ -2,8 +2,8 @@ from ctypes import *
 import struct
 import numpy
 
-# https://yuraj.ucoz.com/half-life-formats.pdf
 
+# https://yuraj.ucoz.com/half-life-formats.pdf
 class Wad(object):
     def __init__(self, path: str):
         self.fp = None
@@ -25,6 +25,9 @@ class Wad(object):
 
     def has_texture(self, name: str):
         return name.upper() in self.lumps
+
+    def __contains__(self, item):
+        return self.has_texture(item)
 
     def get_texture_size(self, name: str):
         lump = self.lumps[name.upper()]
@@ -64,6 +67,7 @@ class Wad(object):
         pixels = numpy.flip(pixels, 0)
         return pixels.flatten()
 
+
 class Header(Structure):
     _fields_ = [
         ('magic', c_char * 4),
@@ -71,9 +75,11 @@ class Header(Structure):
         ('lumps_offset', c_uint32)
     ]
 
+
 WAD_LUMP_TYPE_QPIC = 0x42
 WAD_LUMP_TYPE_MIPTEX = 0x43
 WAD_LUMP_TYPE_FONT = 0x46
+
 
 class Lump(Structure):
     _fields_ = [
@@ -86,11 +92,13 @@ class Lump(Structure):
         ('name', c_char * 16)
     ]
 
+
 class Qpic(Structure):
     _fields_ = [
         ('width', c_int32),
         ('height', c_int32),
     ]
+
 
 class MipTex(Structure):
     _fields_ = [
@@ -99,11 +107,13 @@ class MipTex(Structure):
         ('height', c_int32),
     ]
 
+
 class FontCharacter(Structure):
     _fields_ = [
         ('start_offset', c_uint32),
         ('char_width', c_uint32)
     ]
+
 
 class Font(Structure):
     _fields_ = [
@@ -114,11 +124,13 @@ class Font(Structure):
         ('characters', FontCharacter * 256)
     ]
 
+
 __wad_lump_type_map__ = {
     WAD_LUMP_TYPE_QPIC: Qpic,
     WAD_LUMP_TYPE_FONT: Font,
     WAD_LUMP_TYPE_MIPTEX: MipTex
 }
+
 
 def get_data_class_for_lump_type(type: int):
     return __wad_lump_type_map__[type]

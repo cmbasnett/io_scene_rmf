@@ -1,5 +1,13 @@
+import os
 import struct
 from .rmf import *
+
+
+def is_eof(f):
+    s = f.read(1)
+    if s != b'':
+        f.seek(-1, os.SEEK_CUR)
+    return s == b''
 
 
 def unpack(f, fmt):
@@ -28,7 +36,7 @@ class RmfReader:
 
     @staticmethod
     def read_vector3(f, v):
-        v[0], v[1], v[2] = unpack(f, '3f')
+        v[0], v[1], v[2] = map(lambda x: float(int(x)), unpack(f, '3f'))
 
     @staticmethod
     def read_color(f):
@@ -65,7 +73,9 @@ class RmfReader:
             RmfReader.read_vector3(f, vertex)
             face.vertices.append(vertex)
         for i in range(3):
-            RmfReader.read_vector3(f, face.plane[i])
+            plane_vertex = numpy.array([0.0, 0.0, 0.0])
+            RmfReader.read_vector3(f, plane_vertex)
+            face.plane[i] = plane_vertex
         return face
 
     @staticmethod
@@ -186,5 +196,6 @@ class RmfReader:
                 visgroup = RmfReader.read_visgroup(f)
                 rmf.visgroups.append(visgroup)
             rmf.root_object = RmfReader.read_object(f)
-            rmf.docinfo = RmfReader.read_docinfo(f)
+            if not is_eof(f):
+                rmf.docinfo = RmfReader.read_docinfo(f)
             return rmf

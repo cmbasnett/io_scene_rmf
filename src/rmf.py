@@ -33,7 +33,7 @@ class Rmf:
 
     class Face(object):
         def __init__(self):
-            self.texture_name = ''
+            self.texture_name = 'NULL'
             self.texture_u_axis = numpy.array([1.0, 0.0, 0.0])
             self.texture_u_shift = 0.0
             self.texture_v_axis = numpy.array([0.0, 0.0, 1.0])

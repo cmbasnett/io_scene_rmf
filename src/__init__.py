@@ -44,10 +44,7 @@ icons = [
 ]
 
 classes = (
-    importer.RMF_OT_AddWadOperator,
     importer.RMF_OT_ImportOperator,
-    importer.RMF_UL_WadList,
-    importer.RMF_LI_WadListItem,
     exporter.RMF_OT_ExportOperator
 )
 
@@ -69,9 +66,6 @@ def register():
     for icon in icons:
         config.rmf_icons.load(icon, os.path.join(icons_dir, icon + '.png'), 'IMAGE')
 
-    bpy.types.Scene.rmf_wad_list = CollectionProperty(type=importer.RMF_LI_WadListItem)
-    bpy.types.Scene.rmf_wad_list_index = IntProperty(default=0)
-
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
@@ -79,9 +73,6 @@ def register():
 def unregister():
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
-
-    del bpy.types.Scene.rmf_wad_list
-    del bpy.types.Scene.rmf_wad_list_index
 
     bpy.utils.previews.remove(config.rmf_icons)
 

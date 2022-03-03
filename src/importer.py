@@ -2,62 +2,12 @@ import bpy
 import bpy_extras
 import bmesh
 import os
-from mathutils import Vector, Matrix, Quaternion
+import glob
 from bpy.props import StringProperty, BoolProperty, IntProperty, FloatProperty, CollectionProperty
 from .reader import RmfReader
 from .rmf import *
 from .wad import *
-from .config import rmf_icons
 from .utils import convert_rmf_face_texture_coordinates_to_uvs
-
-
-class RMF_LI_WadListItem(bpy.types.PropertyGroup):
-    path: StringProperty()
-    texture_count: IntProperty()
-
-    @property
-    def name(self):
-        return self.path
-
-class RMF_UL_WadList(bpy.types.UIList):
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        layout.alignment = 'LEFT'
-        # layout.prop(item, 'is_selected', icon_only=True)
-        layout.label(text=item.path, icon='ACTION')
-
-    def filter_items(self, context, data, property):
-        wads = getattr(data, property)
-        flt_flags = []
-        flt_neworder = []
-        if self.filter_name:
-            flt_flags = bpy.types.UI_UL_list.filter_items_by_name(self.filter_name, self.bitflag_filter_item, wads, 'name', reverse=self.use_filter_invert)
-        return flt_flags, flt_neworder
-
-
-class RMF_OT_AddWadOperator(bpy.types.Operator):
-    bl_idname = "scene.rmf_add_wad_operator"
-    bl_label = "Add WADs"
-
-    filepath : bpy.props.StringProperty(name="File Path", description="Filepath used for importing WAD files", maxlen=1024, default="")
-    files : bpy.props.CollectionProperty(
-        name="File Path",
-        type=bpy.types.OperatorFileListElement,
-    )
-    filename_ext = ".wad"
-    filter_glob : bpy.props.StringProperty(default="*.wad", options={'HIDDEN'})
-
-    def execute(self, context):
-        root = os.path.dirname(self.filepath)
-        for file in self.files:
-            wad_list_item = context.scene.rmf_wad_list.add()
-            wad_list_item.path = os.path.join(root, file.name)
-            wad_list_item.texture_count = 0
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        wm = context.window_manager
-        wm.fileselect_add(self)
-        return {'RUNNING_MODAL'}
 
 
 class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
@@ -77,12 +27,14 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
     )
 
     should_import_textures : BoolProperty(
-        default=False
+        default=True
     )
 
     should_ignore_null_faces : BoolProperty(
         default=True,
     )
+
+    wad_directory = bpy.props.StringProperty(subtype="FILE_PATH", default='C:\Program Files (x86)\Steam\steamapps\common\Half-Life')
 
     wads = []
     texture_size_cache = dict()  # str: tuple dict
@@ -93,38 +45,36 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         layout.prop(self, 'should_import_textures', text='Import Textures')
         if self.should_import_textures:
             box = layout.box()
-            box.label(text='Textures', icon='ACTION')
             row = box.row()
-            row.template_list('RMF_UL_WadList', 'asd', scene, 'rmf_wad_list', scene, 'rmf_wad_list_index', rows=8)
-            layout.operator(RMF_OT_AddWadOperator.bl_idname, icon='ADD')
+            row.prop(self, 'wad_directory')
         layout.prop(self, 'should_ignore_null_faces', text='Ignore NULL faces')
 
     '''
     Loads all the WADs in the list.
     '''
     def load_wads(self, context):
-        self.wads.clear()
-        for wad in context.scene.rmf_wad_list:
-            self.wads.append(Wad(wad.path))
+        pathname = os.path.join(self.wad_directory, '**', '*.wad')
+        for path in glob.glob(pathname, recursive=True):
+            self.wads.append(Wad(path))
 
-    def has_wad_for_texture(self, name):
+    def has_wad_for_texture(self, name: str):
         try:
             self.get_wad_for_texture(name)
             return True
         except LookupError:
             return False
 
-    def get_wad_for_texture(self, name):
+    def get_wad_for_texture(self, name: str):
         name = name.upper()
         for wad in self.wads:
             if wad.has_texture(name):
                 return wad
         raise LookupError(f'no wad with texture "{name}"')
 
-    ''''
-    Gets the size of a texture, also caches the lookup to a local dictionary.
-    '''
     def get_texture_size(self, name: str):
+        """"
+        Gets the size of a texture, also caches the lookup to a local dictionary.
+        """
         name = name.upper()
         if name in self.texture_size_cache:
             return self.texture_size_cache[name]
@@ -169,12 +119,15 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         return material
 
     def add_solid(self, solid):
-        '''
+        """
         Prune faces based on material names.
-        '''
+        """
         # TODO: have this list be part of the settings!
         textures_to_ignore = {'NULL', 'AAATRIGGER', 'CLIP', 'SKY', '{BLUE'}
-        faces = list(filter(lambda f: f.texture_name not in textures_to_ignore, solid.faces))
+        if self.should_ignore_null_faces:
+            faces = list(filter(lambda f: f.texture_name not in textures_to_ignore, solid.faces))
+        else:
+            faces = solid.faces
 
         if len(faces) == 0:
             return None
@@ -195,17 +148,24 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
                 mesh.materials.append(material)
 
         bm = bmesh.new()
-        vertex_offset = 0
+        vertices = []
         for f in faces:
-            for vertex in f.vertices:
-                bm.verts.new(tuple(vertex))
+            vertex_indices = []
+            face_vertices = map(lambda v: (v[0], v[1], v[2]), f.vertices)
+            for vertex in face_vertices:
+                if vertex not in vertices:
+                    vertex_indices.append(len(vertices))
+                    vertices.append(vertex)
+                    bm.verts.new(tuple(vertex))
+                else:
+                    vertex_indices.append(vertices.index(vertex))
+
             bm.verts.ensure_lookup_table()
 
             # The face order is reversed because of differences in winding order
-            face = reversed([bm.verts[vertex_offset + x] for x in range(len(f.vertices))])
+            face = reversed([bm.verts[i] for i in vertex_indices])
             bmface = bm.faces.new(face)
             bmface.material_index = textures.index(f.texture_name)
-            vertex_offset += len(f.vertices)
 
         bm.to_mesh(mesh)
 
@@ -243,7 +203,6 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
             return bpy.data.collections['Trigger']
         else:
             return bpy.context.scene.collection
-
 
     def add_object(self, object):
         if type(object) == Rmf.Solid:
