@@ -1,17 +1,17 @@
 import bpy
-import bpy_extras
+from bpy_extras.io_utils import ImportHelper
 import bmesh
 import os
-from mathutils import Vector, Matrix, Quaternion
-from bpy.props import StringProperty, BoolProperty, IntProperty, FloatProperty, CollectionProperty
+from typing import cast as typing_cast
+from bpy.types import ShaderNodeTexImage, Operator, PropertyGroup, UIList, UI_UL_list, OperatorFileListElement
+from bpy.props import StringProperty, BoolProperty, IntProperty, CollectionProperty
 from .reader import RmfReader
 from .rmf import *
 from .wad import *
-from .config import rmf_icons
 from .utils import convert_rmf_face_texture_coordinates_to_uvs
 
 
-class RMF_LI_WadListItem(bpy.types.PropertyGroup):
+class RMF_LI_WadListItem(PropertyGroup):
     path: StringProperty()
     texture_count: IntProperty()
 
@@ -19,7 +19,7 @@ class RMF_LI_WadListItem(bpy.types.PropertyGroup):
     def name(self):
         return self.path
 
-class RMF_UL_WadList(bpy.types.UIList):
+class RMF_UL_WadList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.alignment = 'LEFT'
         # layout.prop(item, 'is_selected', icon_only=True)
@@ -30,21 +30,21 @@ class RMF_UL_WadList(bpy.types.UIList):
         flt_flags = []
         flt_neworder = []
         if self.filter_name:
-            flt_flags = bpy.types.UI_UL_list.filter_items_by_name(self.filter_name, self.bitflag_filter_item, wads, 'name', reverse=self.use_filter_invert)
+            flt_flags = UI_UL_list.filter_items_by_name(self.filter_name, self.bitflag_filter_item, wads, 'name', reverse=self.use_filter_invert)
         return flt_flags, flt_neworder
 
 
-class RMF_OT_AddWadOperator(bpy.types.Operator):
+class RMF_OT_AddWadOperator(Operator):
     bl_idname = "scene.rmf_add_wad_operator"
     bl_label = "Add WADs"
 
-    filepath : bpy.props.StringProperty(name="File Path", description="Filepath used for importing WAD files", maxlen=1024, default="")
-    files : bpy.props.CollectionProperty(
+    filepath : StringProperty(name="File Path", description="Filepath used for importing WAD files", maxlen=1024, default="")
+    files : CollectionProperty(
         name="File Path",
-        type=bpy.types.OperatorFileListElement,
+        type=OperatorFileListElement,
     )
     filename_ext = ".wad"
-    filter_glob : bpy.props.StringProperty(default="*.wad", options={'HIDDEN'})
+    filter_glob : StringProperty(default="*.wad", options={'HIDDEN'})
 
     def execute(self, context):
         root = os.path.dirname(self.filepath)
@@ -56,12 +56,12 @@ class RMF_OT_AddWadOperator(bpy.types.Operator):
 
 
     def invoke(self, context, event):
-        wm = context.window_manager
-        wm.fileselect_add(self)
+        assert context.window_manager
+        context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
 
-class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
+class RMF_OT_import(Operator, ImportHelper):
     """This appears in the tooltip of the operator and in the generated docs"""
     bl_idname = 'io_scene_rmf.rmf_import'  # important since its how bpy.ops.import_test.some_data is constructed
     bl_label = 'Import Rich Map Format'
@@ -153,13 +153,15 @@ class RMF_OT_ImportOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper
         if bpy.data.materials.find(texture_name) != -1:
             return bpy.data.materials[texture_name]
         material = bpy.data.materials.new(texture_name)
-        material.use_nodes = True
+        if material.node_tree is None:
+            return None
         nodes = material.node_tree.nodes
         links = material.node_tree.links
+
         # TODO: make this better, set up node positions etc.
         diffuse_bsdf_node = nodes.new('ShaderNodeBsdfDiffuse')
 
-        image_texture_node = nodes.new('ShaderNodeTexImage')
+        image_texture_node = typing_cast(ShaderNodeTexImage, nodes.new('ShaderNodeTexImage'))
         image_texture_node.image = self.load_image(texture_name)
 
         material_output_node = nodes['Material Output']

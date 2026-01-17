@@ -1,18 +1,18 @@
 import numpy
 
 
-class Color(object):
+class Color:
     def __init__(self):
-        self.r = 0
-        self.g = 0
-        self.b = 0
+        self.r: int = 0
+        self.g: int = 0
+        self.b: int = 0
 
     def __repr__(self):
         return ','.join(map(lambda x: str(x), [self.r, self.g, self.b]))
 
 
 class Rmf:
-    class VisGroup(object):
+    class VisGroup:
         def __init__(self):
             self.name = ''
             self.color = Color()
@@ -22,7 +22,7 @@ class Rmf:
         def __repr__(self):
             return self.name
 
-    class Face(object):
+    class Face:
         def __init__(self):
             self.texture_name = ''
             self.texture_u_axis = numpy.array([0.0, 0.0, 0.0])
@@ -46,7 +46,7 @@ class Rmf:
         def is_trigger(self):
             return self.texture_name == 'AAATRIGGER'
 
-    class Solid(object):
+    class Solid:
         def __init__(self):
             self.visgroup_index = 0
             self.color = Color()
@@ -65,19 +65,19 @@ class Rmf:
             return any(map(lambda x: x.is_trigger, self.faces))
 
 
-    class World(object):
+    class World:
         def __init__(self):
             self.objects = []
             self.classname = ''
             self.paths = []
             self.properties = []
 
-    class Entity(object):  # TODO: one of these has to be the rotation
+    class Entity:  # TODO: one of these has to be the rotation
         def __init__(self):
-            self.visgroup_index = 0
+            self.visgroup_index: int = 0
             self.color = Color()
-            self.brushes = []
-            self.classname = ''
+            self.brushes: list[Rmf.Solid] = []
+            self.classname: str = ''
             self.flags = ''
             self.properties = {}
             self.location = numpy.array([0.0, 0.0, 0.0])
@@ -89,22 +89,22 @@ class Rmf:
         def is_point_entity(self):
             return len(self.brushes) == 0
 
-    class Corner(object):
+    class Corner:
         def __init__(self):
             self.location = numpy.array([0.0, 0.0, 0.0])
-            self.index = 0
-            self.name = ''
+            self.index: int = 0
+            self.name: str = ''
             self.properties = dict()
 
-    class Path(object):
+    class Path:
         def __init__(self):
-            self.name = ''
-            self.path = ''
-            self.type = 0
-            self.corners = []
+            self.name: str = ''
+            self.path: str = ''
+            self.type: int = 0
+            self.corners: list[Rmf.Corner] = []
 
-    class Group(object):
+    class Group:
         def __init__(self):
-            self.visgroup_index = 0
+            self.visgroup_index: int = 0
             self.color = Color()
             self.objects = []
