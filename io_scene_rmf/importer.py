@@ -1,3 +1,5 @@
+import math
+
 import bpy
 from bpy_extras.io_utils import ImportHelper
 import bmesh
@@ -9,6 +11,8 @@ from .reader import RmfReader
 from .rmf import *
 from .wad import *
 from .utils import convert_rmf_face_texture_coordinates_to_uvs
+from mathutils import Matrix, Vector
+from math import radians
 
 
 class RMF_LI_WadListItem(PropertyGroup):
@@ -173,16 +177,48 @@ class RMF_OT_import(Operator, ImportHelper):
 
         return material
 
-    def add_solid(self, solid: Rmf.Solid):
+    def add_camera(self, camera: Rmf.Camera) -> bpy.types.Object:
+        print('Adding camera')
+        camera_data = bpy.data.cameras.new(name='Camera')
+        camera_object = bpy.data.objects.new('Camera', camera_data)
+        camera_object.location = tuple(camera.eye_position)
+        camera_direction = Vector(camera.look_position) - Vector(camera.eye_position)
+        camera_direction.normalize()
+        print(f'Camera direction: {camera_direction}')
+
+        # Calculate forward and left vectors
+        forward = camera_direction
+        up = Vector((0, 0, 1))  # Assuming Z is up
+        left = up.cross(forward)
+        assert isinstance(left, Vector)
+
+        # Calculate the rotation matrix
+        rotation_matrix = Matrix((forward, left, up)).transposed()
+        camera_object.rotation_euler = rotation_matrix.to_euler()
+        # Swap X and Z in euler angles.
+        camera_object.rotation_euler.x, camera_object.rotation_euler.z = camera_object.rotation_euler.z, camera_object.rotation_euler.x
+        # Then swap Y and Z in euler angles.
+        camera_object.rotation_euler.y, camera_object.rotation_euler.z = camera_object.rotation_euler.z, camera_object.rotation_euler.y
+
+
+        # Set this to the same FOV that J.A.C.K. uses by default.
+        camera_data.lens_unit = 'FOV'
+        camera_data.angle = radians(90.0)
+
+        # Add the camera to the scene
+        bpy.context.scene.collection.objects.link(camera_object)
+
+        return camera_object
+
+    def add_solid(self, solid: Rmf.Solid) -> bpy.types.Object:
         '''
         Prune faces based on material names.
         '''
         # TODO: have this list be part of the settings!
-        textures_to_ignore = {'NULL', 'AAATRIGGER', 'CLIP', 'SKY', '{BLUE'}
-        faces = list(filter(lambda f: f.texture_name not in textures_to_ignore, solid.faces))
+        # textures_to_ignore = {'NULL', 'AAATRIGGER', 'CLIP', 'SKY', '{BLUE'}
 
-        if len(faces) == 0:
-            return None
+        # if len(faces) == 0:
+        #     return None
 
         mesh_name = 'Solid.000'
         mesh = bpy.data.meshes.new(mesh_name)
@@ -193,24 +229,46 @@ class RMF_OT_import(Operator, ImportHelper):
         Create or reuse materials 
         '''
         textures = []
-        for f in faces:
+        for f in solid.faces:
             material = self.load_material(f.texture_name)
             if f.texture_name not in textures:
                 textures.append(f.texture_name)
                 mesh.materials.append(material)
 
-        bm = bmesh.new()
-        vertex_offset = 0
-        for f in faces:
-            for vertex in f.vertices:
-                bm.verts.new(tuple(vertex))
-            bm.verts.ensure_lookup_table()
 
+        # For all the faces, add their unique vertices.
+        face_vertex_index_count = sum(map(lambda face: len(face.vertices), solid.faces))
+        face_vertex_indices = numpy.zeros(face_vertex_index_count, dtype=int)
+        vertices: list[NDArray[float]] = []
+        j = 0
+        for face in solid.faces:
+            for vertex in face.vertices:
+                index: int | None = None
+                for i, v in enumerate(vertices):
+                    if (vertex == v).all():
+                        index = i
+                        break
+                if index is None:
+                    index = len(vertices)
+                    vertices.append(vertex)
+                face_vertex_indices[j] = index
+                j += 1
+        
+        bm = bmesh.new()
+
+        # Add the vertices.
+        for vertex in vertices:
+            bm.verts.new(tuple(vertex))
+        bm.verts.ensure_lookup_table()
+
+        # Now add the faces.
+        j = 0
+        for f in solid.faces:
             # The face order is reversed because of differences in winding order
-            face = list(reversed([bm.verts[vertex_offset + x] for x in range(len(f.vertices))]))
+            face = list(reversed([bm.verts[x] for x in face_vertex_indices[j:j+len(f.vertices)]]))
             bmface = bm.faces.new(face)
             bmface.material_index = textures.index(f.texture_name)
-            vertex_offset += len(f.vertices)
+            j += len(f.vertices)
 
         bm.to_mesh(mesh)
 
@@ -224,7 +282,7 @@ class RMF_OT_import(Operator, ImportHelper):
             '''
             uv_layer = mesh.uv_layers.new()
             j = 0
-            for face_index, face in enumerate(faces):
+            for face_index, face in enumerate(solid.faces):
                 try:
                     texture_size = self.get_texture_size(face.texture_name)
                 except LookupError:
@@ -239,7 +297,7 @@ class RMF_OT_import(Operator, ImportHelper):
 
         return mesh_object
 
-    def get_collection_for_solid(self, solid: Rmf.Solid):
+    def get_collection_for_solid(self, solid: Rmf.Solid) -> bpy.types.Collection:
         if solid.has_clip:
             return bpy.data.collections['Clip']
         elif solid.has_sky:
@@ -252,19 +310,23 @@ class RMF_OT_import(Operator, ImportHelper):
 
     def add_object(self, rmf_object: Rmf.Object):
         if type(rmf_object) == Rmf.Solid:
-            solid = self.add_solid(rmf_object)
+            self.add_solid(rmf_object)
         elif type(rmf_object) == Rmf.Entity:
             # TODO: abstract this out somehow
             entity = rmf_object
             if entity.is_point_entity:
-                if entity.classname == 'light_environment':
-                    # TODO: create new light
-                    light_data = bpy.data.lights.new(name='light_environment', type='SUN')
-                    light_object = bpy.data.objects.new('light_environment', light_data)
-                    light_object.location = tuple(entity.location)
-                    # TODO: put the light somewhere
-                    bpy.context.scene.collection.objects.link(light_object)
-                    pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
+                entity_object = bpy.data.objects.new(entity.classname, None)
+                for key, value in entity.properties.items():
+                    entity_object[key] = value
+                # pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
+                # if entity.classname == 'light_environment':
+                #     # TODO: create new light
+                #     light_data = bpy.data.lights.new(name='light_environment', type='SUN')
+                #     light_object = bpy.data.objects.new('light_environment', light_data)
+                #     light_object.location = tuple(entity.location)
+                #     # TODO: put the light somewhere
+                #     bpy.context.scene.collection.objects.link(light_object)
+                #     pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
             else:
                 # TODO: create a collection
                 brush_entities_collection = bpy.data.collections['Brush Entities']
@@ -288,11 +350,37 @@ class RMF_OT_import(Operator, ImportHelper):
             if name not in bpy.data.collections:
                 collection = bpy.data.collections.new(name)
                 bpy.context.scene.collection.children.link(collection)
+    
+    # TODO: not verified to be working. need some test data.
+    def add_path(self, path: Rmf.Path) -> bpy.types.Object:
+        path_curve_data = bpy.data.curves.new(name=path.name, type='CURVE')
+        path_curve_data.dimensions = '3D'
+        path_curve_data.resolution_u = 2
+
+        path_curve_object = bpy.data.objects.new(path.name, path_curve_data)
+
+        polyline = path_curve_data.splines.new('POLY')
+        polyline.points.add(len(path.corners) - 1)
+        for i, corner in enumerate(path.corners):
+            x, y, z = corner.location
+            polyline.points[i].co = (x, y, z, 1)
+
+        # Add the curve object to the scene
+        bpy.context.scene.collection.objects.link(path_curve_object)
+
+        return path_curve_object
 
     def import_world(self, map: Rmf.World):
         self.create_collections()
         for _i, object in enumerate(map.objects):
             self.add_object(object)
+        # Paths
+        for path in map.paths:
+            self.add_path(path)
+
+        # Cameras
+        for camera in map.cameras:
+            self.add_camera(camera)
 
     def execute(self, context: Context):
         self.load_wads(context)

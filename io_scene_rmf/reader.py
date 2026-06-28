@@ -28,11 +28,11 @@ class RmfReader:
         pass
 
     @staticmethod
-    def _read_vector2(f: BinaryIO, v):
+    def _read_vector2(f: BinaryIO, v: NDArray[float]):
         v[0], v[1] = _unpack(f, '2f')
 
     @staticmethod
-    def _read_vector3(f: BinaryIO, v):
+    def _read_vector3(f: BinaryIO, v: NDArray[float]):
         v[0], v[1], v[2] = _unpack(f, '3f')
 
     @staticmethod
