@@ -4,7 +4,7 @@ import numpy
 
 # https://yuraj.ucoz.com/half-life-formats.pdf
 
-class Wad(object):
+class Wad:
     def __init__(self, path: str):
         self.fp = None
         self.lumps = dict()

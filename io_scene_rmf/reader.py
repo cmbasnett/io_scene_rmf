@@ -1,5 +1,6 @@
 import struct
-from .rmf import *
+import numpy
+from .rmf import *   # TODO: remove wildcard import
 
 
 def unpack(f, fmt):
