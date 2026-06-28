@@ -3,7 +3,7 @@ from bpy_extras.io_utils import ImportHelper
 import bmesh
 import os
 from typing import cast as typing_cast
-from bpy.types import ShaderNodeTexImage, Operator, PropertyGroup, UIList, UI_UL_list, OperatorFileListElement
+from bpy.types import Context, ShaderNodeTexImage, Operator, PropertyGroup, UIList, UI_UL_list, OperatorFileListElement
 from bpy.props import StringProperty, BoolProperty, IntProperty, CollectionProperty
 from .reader import RmfReader
 from .rmf import *
@@ -18,6 +18,7 @@ class RMF_LI_WadListItem(PropertyGroup):
     @property
     def name(self):
         return self.path
+
 
 class RMF_UL_WadList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
@@ -82,14 +83,15 @@ class RMF_OT_import(Operator, ImportHelper):
     )
 
     should_ignore_null_faces : BoolProperty(
-        default=True,
+        default=False,
     )
 
     wads = []
     texture_size_cache = dict()  # str: tuple dict
 
-    def draw(self, context):
+    def draw(self, context: Context):
         layout = self.layout
+        assert layout is not None
         scene = context.scene
         layout.prop(self, 'should_import_textures', text='Import Textures')
         if self.should_import_textures:
@@ -108,14 +110,14 @@ class RMF_OT_import(Operator, ImportHelper):
         for wad in context.scene.rmf_wad_list:
             self.wads.append(Wad(wad.path))
 
-    def has_wad_for_texture(self, name):
+    def has_wad_for_texture(self, name: str):
         try:
             self.get_wad_for_texture(name)
             return True
         except LookupError:
             return False
 
-    def get_wad_for_texture(self, name):
+    def get_wad_for_texture(self, name: str):
         name = name.upper()
         for wad in self.wads:
             if wad.has_texture(name):
@@ -138,7 +140,7 @@ class RMF_OT_import(Operator, ImportHelper):
         wad = self.get_wad_for_texture(name)
         return wad.get_texture_pixels(name)
 
-    def load_image(self, texture_name):
+    def load_image(self, texture_name: str):
         if texture_name in bpy.data.images:
             return bpy.data.images[texture_name]
         if not self.has_wad_for_texture(texture_name):
@@ -149,7 +151,7 @@ class RMF_OT_import(Operator, ImportHelper):
         image.pixels = pixels
         return image
 
-    def load_material(self, texture_name):
+    def load_material(self, texture_name: str):
         if bpy.data.materials.find(texture_name) != -1:
             return bpy.data.materials[texture_name]
         material = bpy.data.materials.new(texture_name)
@@ -171,7 +173,7 @@ class RMF_OT_import(Operator, ImportHelper):
 
         return material
 
-    def add_solid(self, solid):
+    def add_solid(self, solid: Rmf.Solid):
         '''
         Prune faces based on material names.
         '''
@@ -205,7 +207,7 @@ class RMF_OT_import(Operator, ImportHelper):
             bm.verts.ensure_lookup_table()
 
             # The face order is reversed because of differences in winding order
-            face = reversed([bm.verts[vertex_offset + x] for x in range(len(f.vertices))])
+            face = list(reversed([bm.verts[vertex_offset + x] for x in range(len(f.vertices))]))
             bmface = bm.faces.new(face)
             bmface.material_index = textures.index(f.texture_name)
             vertex_offset += len(f.vertices)
@@ -237,7 +239,7 @@ class RMF_OT_import(Operator, ImportHelper):
 
         return mesh_object
 
-    def get_collection_for_solid(self, solid):
+    def get_collection_for_solid(self, solid: Rmf.Solid):
         if solid.has_clip:
             return bpy.data.collections['Clip']
         elif solid.has_sky:
@@ -248,12 +250,12 @@ class RMF_OT_import(Operator, ImportHelper):
             return bpy.context.scene.collection
 
 
-    def add_object(self, object):
-        if type(object) == Rmf.Solid:
-            solid = self.add_solid(object)
-        elif type(object) == Rmf.Entity:
+    def add_object(self, rmf_object: Rmf.Object):
+        if type(rmf_object) == Rmf.Solid:
+            solid = self.add_solid(rmf_object)
+        elif type(rmf_object) == Rmf.Entity:
             # TODO: abstract this out somehow
-            entity = object
+            entity = rmf_object
             if entity.is_point_entity:
                 if entity.classname == 'light_environment':
                     # TODO: create new light
@@ -269,12 +271,12 @@ class RMF_OT_import(Operator, ImportHelper):
                 entity_collection = bpy.data.collections.new(entity.classname)
                 brush_entities_collection.children.link(entity_collection)
                 # TODO: make a new EMPTY
-                for solid in object.brushes:
+                for solid in rmf_object.brushes:
                     solid_object = self.add_solid(solid)
                     if solid_object is not None:
                         entity_collection.objects.link(solid_object)
-        elif type(object) == Rmf.Group:
-            objects = [self.add_object(x) for x in object.objects]
+        elif type(rmf_object) == Rmf.Group:
+            objects = [self.add_object(x) for x in rmf_object.objects]
             # bpy.ops.object.select_all(action='DESELECT')
             # for object in objects:
             #    object.select = True
@@ -287,13 +289,13 @@ class RMF_OT_import(Operator, ImportHelper):
                 collection = bpy.data.collections.new(name)
                 bpy.context.scene.collection.children.link(collection)
 
-    def import_map(self, map):
+    def import_world(self, map: Rmf.World):
         self.create_collections()
-        for i, object in enumerate(map.objects):
+        for _i, object in enumerate(map.objects):
             self.add_object(object)
 
-    def execute(self, context):
+    def execute(self, context: Context):
         self.load_wads(context)
         rmf = RmfReader().from_file(self.filepath)
-        self.import_map(rmf)
+        self.import_world(rmf)
         return {'FINISHED'}

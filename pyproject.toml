@@ -1,0 +1,10 @@
+[project]
+name = "io-scene-rmf"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fake-bpy-module-latest>=20260501",
+    "numpy>=2.5.0",
+]
