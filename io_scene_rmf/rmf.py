@@ -34,8 +34,8 @@ class Rmf:
             self.texture_v_shift: float = 0.0
             self.texture_rotation: float = 0.0
             self.texture_scale: NDArray[float] = numpy.array([0.0, 0.0])
-            self.vertices: list[NDArray] = []
-            self.plane: list[NDArray] = []
+            self.vertices: list[NDArray[float]] = []
+            self.plane: list[NDArray[float]] = []
 
         @property
         def is_clip(self):

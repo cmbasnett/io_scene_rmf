@@ -314,10 +314,17 @@ class RMF_OT_import(Operator, ImportHelper):
         elif type(rmf_object) == Rmf.Entity:
             # TODO: abstract this out somehow
             entity = rmf_object
+
             if entity.is_point_entity:
-                entity_object = bpy.data.objects.new(entity.classname, None)
+                # Point Entity
+                point_entity_object = bpy.data.objects.new(entity.classname, None)
+                point_entity_object.location = Vector(tuple(entity.location))
+                point_entity_object['classname'] = entity.classname
                 for key, value in entity.properties.items():
-                    entity_object[key] = value
+                    point_entity_object[key] = value
+                point_entities_collection = bpy.data.collections['Point Entities']
+                point_entities_collection.objects.link(point_entity_object)
+
                 # pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
                 # if entity.classname == 'light_environment':
                 #     # TODO: create new light
@@ -328,10 +335,18 @@ class RMF_OT_import(Operator, ImportHelper):
                 #     bpy.context.scene.collection.objects.link(light_object)
                 #     pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
             else:
-                # TODO: create a collection
+                # Brush Entity
                 brush_entities_collection = bpy.data.collections['Brush Entities']
+
+                # TODO: create a collection
                 entity_collection = bpy.data.collections.new(entity.classname)
+
+                entity_collection['classname'] = entity.classname
+                for key, value in entity.properties.items():
+                    entity_collection[key] = value
+
                 brush_entities_collection.children.link(entity_collection)
+
                 # TODO: make a new EMPTY
                 for solid in rmf_object.brushes:
                     solid_object = self.add_solid(solid)
@@ -345,7 +360,7 @@ class RMF_OT_import(Operator, ImportHelper):
             # bpy.oops.group.create()
 
     def create_collections(self):
-        collections_names = 'Trigger', 'Sky', 'Clip', 'Brush Entities'
+        collections_names = 'Trigger', 'Sky', 'Clip', 'Brush Entities', 'Point Entities'
         for name in collections_names:
             if name not in bpy.data.collections:
                 collection = bpy.data.collections.new(name)
