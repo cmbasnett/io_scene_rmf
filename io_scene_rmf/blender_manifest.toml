@@ -5,7 +5,7 @@ schema_version = "1.0.0"
 
 id = "io_scene_rmf"
 version = "1.0.0"
-name = "io_scene_rmf"
+name = "Rich Map Format (.rmf)"
 tagline = "Blender addon for importing Rich Map Format (RMF) map files"
 maintainer = "Colin Basnett <cmbasnett@proton.me>"
 type = "add-on"

@@ -12,6 +12,15 @@ class Color:
 
     def __repr__(self):
         return ','.join(map(lambda x: str(x), [self.r, self.g, self.b]))
+    
+    def __iter__(self):
+        yield self.r
+        yield self.g
+        yield self.b
+    
+    @property
+    def rgba_float(self) -> tuple[float, float, float, float]:
+        return (self.r / 255.0, self.g / 255.0, self.b / 255.0, 1.0)
 
 
 class Rmf:
@@ -126,3 +135,6 @@ class Rmf:
             self.active_camera_index: int = 0
             self.cameras: list[Rmf.Camera] = []
 
+    def __init__(self) -> None:
+        self.world: Rmf.World | None = None
+        self.vis_groups: list[Rmf.VisGroup] = []

@@ -1,11 +1,9 @@
-import math
-
 import bpy
 from bpy_extras.io_utils import ImportHelper
 import bmesh
 import os
 from typing import cast as typing_cast
-from bpy.types import Context, ShaderNodeTexImage, Operator, PropertyGroup, UIList, UI_UL_list, OperatorFileListElement
+from bpy.types import Collection, Context, ShaderNodeTexImage, Operator, PropertyGroup, UIList, UI_UL_list, OperatorFileListElement
 from bpy.props import StringProperty, BoolProperty, IntProperty, CollectionProperty
 from .reader import RmfReader
 from .rmf import *
@@ -15,7 +13,7 @@ from mathutils import Matrix, Vector
 from math import radians
 
 
-class RMF_LI_WadListItem(PropertyGroup):
+class RMF_LI_wad_list_item(PropertyGroup):
     path: StringProperty()
     texture_count: IntProperty()
 
@@ -24,7 +22,7 @@ class RMF_LI_WadListItem(PropertyGroup):
         return self.path
 
 
-class RMF_UL_WadList(UIList):
+class RMF_UL_wad_list(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.alignment = 'LEFT'
         # layout.prop(item, 'is_selected', icon_only=True)
@@ -39,7 +37,7 @@ class RMF_UL_WadList(UIList):
         return flt_flags, flt_neworder
 
 
-class RMF_OT_AddWadOperator(Operator):
+class RMF_OT_wad_add(Operator):
     bl_idname = "scene.rmf_add_wad_operator"
     bl_label = "Add WADs"
 
@@ -86,12 +84,9 @@ class RMF_OT_import(Operator, ImportHelper):
         default=False
     )
 
-    should_ignore_null_faces : BoolProperty(
-        default=False,
-    )
-
     wads = []
     texture_size_cache = dict()  # str: tuple dict
+    vis_group_names: list[str] = []
 
     def draw(self, context: Context):
         layout = self.layout
@@ -103,8 +98,7 @@ class RMF_OT_import(Operator, ImportHelper):
             box.label(text='Textures', icon='ACTION')
             row = box.row()
             row.template_list('RMF_UL_WadList', 'asd', scene, 'rmf_wad_list', scene, 'rmf_wad_list_index', rows=8)
-            layout.operator(RMF_OT_AddWadOperator.bl_idname, icon='ADD')
-        layout.prop(self, 'should_ignore_null_faces', text='Ignore NULL faces')
+            layout.operator(RMF_OT_wad_add.bl_idname, icon='ADD')
 
     '''
     Loads all the WADs in the list.
@@ -184,7 +178,6 @@ class RMF_OT_import(Operator, ImportHelper):
         camera_object.location = tuple(camera.eye_position)
         camera_direction = Vector(camera.look_position) - Vector(camera.eye_position)
         camera_direction.normalize()
-        print(f'Camera direction: {camera_direction}')
 
         # Calculate forward and left vectors
         forward = camera_direction
@@ -200,7 +193,6 @@ class RMF_OT_import(Operator, ImportHelper):
         # Then swap Y and Z in euler angles.
         camera_object.rotation_euler.y, camera_object.rotation_euler.z = camera_object.rotation_euler.z, camera_object.rotation_euler.y
 
-
         # Set this to the same FOV that J.A.C.K. uses by default.
         camera_data.lens_unit = 'FOV'
         camera_data.angle = radians(90.0)
@@ -214,16 +206,11 @@ class RMF_OT_import(Operator, ImportHelper):
         '''
         Prune faces based on material names.
         '''
-        # TODO: have this list be part of the settings!
-        # textures_to_ignore = {'NULL', 'AAATRIGGER', 'CLIP', 'SKY', '{BLUE'}
-
-        # if len(faces) == 0:
-        #     return None
-
         mesh_name = 'Solid.000'
         mesh = bpy.data.meshes.new(mesh_name)
 
         mesh_object = bpy.data.objects.new(mesh_name, mesh)
+        mesh_object.color = solid.color.rgba_float
 
         '''
         Create or reuse materials 
@@ -309,55 +296,54 @@ class RMF_OT_import(Operator, ImportHelper):
 
 
     def add_object(self, rmf_object: Rmf.Object):
+        vis_group_collection: Collection | None = bpy.data.collections[self.vis_group_names[rmf_object.visgroup_index - 1]] if rmf_object.visgroup_index > 0 else None
         if type(rmf_object) == Rmf.Solid:
-            self.add_solid(rmf_object)
+            solid_object = self.add_solid(rmf_object)
+            if vis_group_collection is not None:
+                vis_group_collection.objects.link(solid_object)
+            yield solid_object
         elif type(rmf_object) == Rmf.Entity:
             # TODO: abstract this out somehow
             entity = rmf_object
 
+            entity_object = bpy.data.objects.new(entity.classname, None)
+            entity_object['classname'] = entity.classname
+            for key, value in entity.properties.items():
+                entity_object[key] = value
+            entity_object.location = Vector(tuple(entity.location))
+
+            if vis_group_collection is not None:
+                vis_group_collection.objects.link(entity_object)
+
+            yield entity_object
+                
             if entity.is_point_entity:
                 # Point Entity
-                point_entity_object = bpy.data.objects.new(entity.classname, None)
-                point_entity_object.location = Vector(tuple(entity.location))
-                point_entity_object['classname'] = entity.classname
-                for key, value in entity.properties.items():
-                    point_entity_object[key] = value
                 point_entities_collection = bpy.data.collections['Point Entities']
-                point_entities_collection.objects.link(point_entity_object)
-
-                # pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
-                # if entity.classname == 'light_environment':
-                #     # TODO: create new light
-                #     light_data = bpy.data.lights.new(name='light_environment', type='SUN')
-                #     light_object = bpy.data.objects.new('light_environment', light_data)
-                #     light_object.location = tuple(entity.location)
-                #     # TODO: put the light somewhere
-                #     bpy.context.scene.collection.objects.link(light_object)
-                #     pitch, yaw, roll = map(lambda x: float(x), entity['angles'].split())
+                point_entities_collection.objects.link(entity_object)
             else:
                 # Brush Entity
-                brush_entities_collection = bpy.data.collections['Brush Entities']
+                group_collection = bpy.data.collections['Brush Entities']
+                group_collection.objects.link(entity_object)
 
-                # TODO: create a collection
-                entity_collection = bpy.data.collections.new(entity.classname)
-
-                entity_collection['classname'] = entity.classname
-                for key, value in entity.properties.items():
-                    entity_collection[key] = value
-
-                brush_entities_collection.children.link(entity_collection)
-
-                # TODO: make a new EMPTY
-                for solid in rmf_object.brushes:
-                    solid_object = self.add_solid(solid)
+                # Add the solids and parent them to the root entity.
+                for solid_object in rmf_object.brushes:
+                    solid_object = self.add_solid(solid_object)
                     if solid_object is not None:
-                        entity_collection.objects.link(solid_object)
+                        group_collection.objects.link(solid_object)
+                    solid_object.parent = entity_object
+                    solid_object.location = -Vector(tuple(entity.location))
+
+                    yield solid_object
         elif type(rmf_object) == Rmf.Group:
-            objects = [self.add_object(x) for x in rmf_object.objects]
-            # bpy.ops.object.select_all(action='DESELECT')
-            # for object in objects:
-            #    object.select = True
-            # bpy.oops.group.create()
+            objects: list[bpy.types.Object] = []
+            for x in rmf_object.objects:
+                objects.extend(self.add_object(x))
+            for obj in objects:
+                if vis_group_collection is not None:
+                    if obj.name not in vis_group_collection.objects:
+                        vis_group_collection.objects.link(obj)
+            yield from objects
 
     def create_collections(self):
         collections_names = 'Trigger', 'Sky', 'Clip', 'Brush Entities', 'Point Entities'
@@ -365,6 +351,7 @@ class RMF_OT_import(Operator, ImportHelper):
             if name not in bpy.data.collections:
                 collection = bpy.data.collections.new(name)
                 bpy.context.scene.collection.children.link(collection)
+                
     
     # TODO: not verified to be working. need some test data.
     def add_path(self, path: Rmf.Path) -> bpy.types.Object:
@@ -385,20 +372,42 @@ class RMF_OT_import(Operator, ImportHelper):
 
         return path_curve_object
 
-    def import_world(self, map: Rmf.World):
-        self.create_collections()
-        for _i, object in enumerate(map.objects):
-            self.add_object(object)
-        # Paths
-        for path in map.paths:
-            self.add_path(path)
+    def import_rmf(self, rmf: Rmf):
+        print('import rmf')
+        for vis_group in rmf.vis_groups:
+            print(vis_group.name)
+            if vis_group.name not in bpy.data.collections:
+                bpy.data.collections.new(vis_group.name)
+            vis_group_collection = bpy.data.collections[vis_group.name]
+            vis_group_collection.hide_viewport = not vis_group.visible
+            self.vis_group_names.append(vis_group.name)
+            bpy.context.scene.collection.children.link(vis_group_collection)
+        print(rmf.world)
+        self.import_world(rmf.world)
 
+    def import_world(self, world: Rmf.World):
+        # Collections
+        self.create_collections()
+        for obj in world.objects:
+            # NOTE: This needs to be forcibly evaluated otherwise it never runs the generator.
+            list(self.add_object(obj))
+        # Paths
+        for path in world.paths:
+            self.add_path(path)
         # Cameras
-        for camera in map.cameras:
+        for camera in world.cameras:
             self.add_camera(camera)
 
     def execute(self, context: Context):
-        self.load_wads(context)
+        #self.load_wads(context)
         rmf = RmfReader().from_file(self.filepath)
-        self.import_world(rmf)
+        self.import_rmf(rmf)
         return {'FINISHED'}
+
+
+__classes__ = [
+    RMF_OT_wad_add,
+    RMF_OT_import,
+    RMF_UL_wad_list,
+    RMF_LI_wad_list_item,
+]

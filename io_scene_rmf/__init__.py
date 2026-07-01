@@ -1,5 +1,6 @@
 import bpy
 from bpy.props import IntProperty, CollectionProperty
+from . import properties
 from . import utils
 from . import wad
 from . import rmf
@@ -10,6 +11,7 @@ _needs_reload = 'bpy' in locals()
 
 if _needs_reload:
     import importlib
+    importlib.reload(properties)
     importlib.reload(utils)
     importlib.reload(wad)
     importlib.reload(rmf)
@@ -20,12 +22,9 @@ icons = [
     # 'lambda',
 ]
 
-classes = (
-    importer.RMF_OT_AddWadOperator,
-    importer.RMF_OT_import,
-    importer.RMF_UL_WadList,
-    importer.RMF_LI_WadListItem,
-)
+classes = \
+    properties.__classes__ + \
+    importer.__classes__
 
 
 def menu_func_import(self, context):
@@ -36,7 +35,7 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    setattr(bpy.types.Scene, 'rmf_wad_list', CollectionProperty(type=importer.RMF_LI_WadListItem))
+    setattr(bpy.types.Scene, 'rmf_wad_list', CollectionProperty(type=importer.RMF_LI_wad_list_item))
     setattr(bpy.types.Scene, 'rmf_wad_list_index', IntProperty(default=0))
 
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)

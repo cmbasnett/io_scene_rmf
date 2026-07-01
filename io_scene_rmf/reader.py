@@ -36,13 +36,13 @@ class RmfReader:
         v[0], v[1], v[2] = _unpack(f, '3f')
 
     @staticmethod
-    def _read_color(f: BinaryIO):
+    def _read_color(f: BinaryIO) -> Color:
         color = Color()
         color.r, color.g, color.b = _unpack(f, '3B')
         return color
 
     @staticmethod
-    def _read_visgroup(fp: BinaryIO):
+    def _read_visgroup(fp: BinaryIO) -> Rmf.VisGroup:
         visgroup = Rmf.VisGroup()
         visgroup.name = _read_fixed_length_null_terminated_string(fp, 128)
         visgroup.color = RmfReader._read_color(fp)
@@ -53,7 +53,7 @@ class RmfReader:
         return visgroup
 
     @staticmethod
-    def _read_face(f: BinaryIO):
+    def _read_face(f: BinaryIO) -> Rmf.Face:
         face = Rmf.Face()
         face.texture_name = _read_fixed_length_null_terminated_string(f, 256)
         f.seek(4, io.SEEK_CUR)  # Skip unknown bytes
@@ -75,7 +75,7 @@ class RmfReader:
         return face
 
     @staticmethod
-    def _read_solid(f: BinaryIO):
+    def _read_solid(f: BinaryIO) -> Rmf.Solid:
         solid = Rmf.Solid()
         solid.visgroup_index = _unpack(f, 'i')[0]
         solid.color = RmfReader._read_color(f)
@@ -85,7 +85,8 @@ class RmfReader:
         return solid
 
     @staticmethod
-    def _read_world(f: BinaryIO):
+    def _read_world(f: BinaryIO) -> Rmf.World:
+        assert 'CMapWorld' == _read_length_prefixed_null_terminated_string(f)
         world = Rmf.World()
         f.read(7)  # ? (probably visgroup and Color fields but not used by VHE)
         object_count = _unpack(f, 'i')[0]
@@ -95,34 +96,31 @@ class RmfReader:
         world.flags = _unpack(f, 'i')[0]
         world.properties = RmfReader._read_properties(f)
         _unpack(f, '12b')
-        from pprint import pprint
-        pprint(world.properties)
         path_count = _unpack(f, 'i')[0]
         world.paths = [RmfReader._read_path(f) for _ in range(path_count)]
         docinfo_header = f.read(8)
         if docinfo_header != b'DOCINFO\x00':
             raise RuntimeError(f'Expected DOCINFO string, got: {docinfo_header}')
         camera_version = _unpack(f, 'f')[0]
-        print(f'Camera version: {camera_version}')
         world.active_camera_index = _unpack(f, 'i')[0]
         camera_count = _unpack(f, 'i')[0]
-        print(f'Camera count: {camera_count}')
         world.cameras = [RmfReader._read_camera(f) for _ in range(camera_count)]
         return world
 
     @staticmethod
-    def _read_camera(f):
+    def _read_camera(f) -> Rmf.Camera:
         camera = Rmf.Camera()
         RmfReader._read_vector3(f, camera.eye_position)
         RmfReader._read_vector3(f, camera.look_position)
         return camera   
 
     @staticmethod
-    def _read_entity(f):
+    def _read_entity(f) -> Rmf.Entity:
         entity = Rmf.Entity()
         entity.visgroup_index = _unpack(f, 'i')[0]
         entity.color = RmfReader._read_color(f)
         brush_count = _unpack(f, 'i')[0]
+        # TODO: we can narrow the output here and ensure all the brushes are solids.
         entity.brushes = [RmfReader._read_object(f) for _ in range(brush_count)]
         entity.classname = _read_length_prefixed_null_terminated_string(f)
         _unpack(f, '4b')
@@ -134,7 +132,7 @@ class RmfReader:
         return entity
 
     @staticmethod
-    def _read_group(f):
+    def _read_group(f) -> Rmf.Group:
         group = Rmf.Group()
         group.visgroup_index = _unpack(f, 'i')[0]
         group.color = RmfReader._read_color(f)
@@ -143,7 +141,7 @@ class RmfReader:
         return group
 
     @staticmethod
-    def _read_corner(f):
+    def _read_corner(f) -> Rmf.Corner:
         corner = Rmf.Corner()
         RmfReader._read_vector3(f, corner.location)
         corner.index = _unpack(f, 'i')[0]
@@ -152,7 +150,7 @@ class RmfReader:
         return corner
 
     @staticmethod
-    def _read_path(f):
+    def _read_path(f) -> Rmf.Path:
         path = Rmf.Path()
         path.name = _read_fixed_length_null_terminated_string(f, 128)
         path.class_name = _read_fixed_length_null_terminated_string(f, 128)
@@ -162,9 +160,8 @@ class RmfReader:
         return path
 
     @staticmethod
-    def _read_object(f):
+    def _read_object(f) -> Rmf.Object:
         object_read_function_map = {
-            'CMapWorld': RmfReader._read_world,
             'CMapEntity': RmfReader._read_entity,
             'CMapGroup': RmfReader._read_group,
             'CMapSolid': RmfReader._read_solid,
@@ -186,6 +183,7 @@ class RmfReader:
     @staticmethod
     def from_file(path):
         with open(path, 'rb') as f:
+            rmf = Rmf()
             _version, _magic = _unpack(f, 'i3s')
             print(f'RMF version: {_version}, magic: {_magic}')
             if _version != 1074580685:
@@ -193,7 +191,7 @@ class RmfReader:
             if _magic != b'RMF':
                 raise RuntimeError(f'Invalid RMF file: {_magic}')
             visgroup_count = _unpack(f, 'i')[0]
-            for i in range(visgroup_count):
-                visgroup = RmfReader._read_visgroup(f)
-            rmf = RmfReader._read_object(f)
+            for _ in range(visgroup_count):
+                rmf.vis_groups.append(RmfReader._read_visgroup(f))
+            rmf.world = RmfReader._read_world(f)
             return rmf

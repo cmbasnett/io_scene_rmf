@@ -7,4 +7,5 @@ requires-python = ">=3.14"
 dependencies = [
     "fake-bpy-module-latest>=20260501",
     "numpy>=2.5.0",
+    "valvefgd>=1.0.5",
 ]
